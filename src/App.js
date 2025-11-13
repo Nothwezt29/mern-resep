@@ -1,53 +1,197 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import "./App.css"; // ← CSS DIPISAH
 
 function App() {
+  const [username, setUsername] = useState(localStorage.getItem("username") || "");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
+  const [seenTitles, setSeenTitles] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [dark, setDark] = useState(false); // 🌙 dark mode state
+  const [dark, setDark] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [lastBackendPage, setLastBackendPage] = useState(0);
 
-  // 🔎 Fungsi cari resep (judul saja)
-  const searchResep = async (customQuery, customPage = 1) => {
-    const q = customQuery || query;
+  const PAGE_SIZE = 16;
+
+  const fetchIdRef = useRef(0);
+  const resultsRef = useRef(results);
+  const seenRef = useRef(seenTitles);
+  const lastBackendPageRef = useRef(lastBackendPage);
+  const hasMoreRef = useRef(hasMore);
+  const pageRef = useRef(page);
+  const queryRef = useRef(query);
+
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  useEffect(() => { seenRef.current = seenTitles; }, [seenTitles]);
+  useEffect(() => { lastBackendPageRef.current = lastBackendPage; }, [lastBackendPage]);
+  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+  useEffect(() => { pageRef.current = page; }, [page]);
+  useEffect(() => { queryRef.current = query; }, [query]);
+
+  const normalize = (s) =>
+    (s || "").toLowerCase().replace(/[^a-z0-9]/gi, "").trim();
+
+  const handleStart = (name) => {
+    if (!name) return alert("Masukkan nama dulu, ya!");
+    localStorage.setItem("username", name);
+    sessionStorage.setItem("sessionActive", "true");
+    setUsername(name);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("username");
+    sessionStorage.removeItem("sessionActive");
+    setUsername("");
+    setResults([]);
+    setSeenTitles(new Set());
+    setHasMore(true);
+    setLastBackendPage(0);
+    setPage(1);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      sessionStorage.removeItem("sessionActive");
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    if (sessionStorage.getItem("sessionActive") && localStorage.getItem("username")) {
+      setUsername(localStorage.getItem("username"));
+    }
+
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  const searchResep = async (customQuery, uiPage = 1) => {
+    const q = (customQuery || queryRef.current || "").trim();
+
+    fetchIdRef.current += 1;
+    const myFetchId = fetchIdRef.current;
+
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+
     if (!q) {
       alert("Masukkan kata kunci dulu, ya!");
       return;
     }
 
+    if (q !== queryRef.current) {
+      setQuery(q);
+      setResults([]);
+      resultsRef.current = [];
+
+      const freshSet = new Set();
+      setSeenTitles(freshSet);
+      seenRef.current = freshSet;
+
+      setLastBackendPage(0);
+      lastBackendPageRef.current = 0;
+
+      setHasMore(true);
+      hasMoreRef.current = true;
+
+      setPage(1);
+      pageRef.current = 1;
+    }
+
+    const neededCount = uiPage * PAGE_SIZE;
+
+    if (resultsRef.current.length >= neededCount && lastBackendPageRef.current > 0) {
+      const start = (uiPage - 1) * PAGE_SIZE;
+      const pageItems = resultsRef.current.slice(start, start + PAGE_SIZE);
+
+      setPage(uiPage);
+      pageRef.current = uiPage;
+
+      speak(`Menampilkan ${pageItems.length} resep ${q} di halaman ${uiPage}.`);
+      return;
+    }
+
+    if (!hasMoreRef.current) {
+      const total = resultsRef.current.length;
+      const maxPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      setPage(Math.min(uiPage, maxPage));
+      speak("Semua hasil resep sudah ditampilkan.");
+      return;
+    }
+
     try {
       setLoading(true);
-      const API_URL = "http://10.198.61.157:5000";
+      const API_URL = "https://mern-resep-backend-production.up.railway.app";
 
-      const res = await fetch(
-        `${API_URL}/api/search?q=${q}&page=${customPage}&limit=16`
-      );           
-      const data = await res.json();
+      let backendPage = lastBackendPageRef.current + 1;
+      let localResults = [...resultsRef.current];
+      let localSeen = new Set(seenRef.current);
+      let backendExhausted = false;
 
-      setResults(data);
-      setPage(customPage);
+      while (localResults.length < neededCount && !backendExhausted) {
+        const res = await fetch(
+          `${API_URL}/api/search?q=${encodeURIComponent(q)}&page=${backendPage}&limit=${PAGE_SIZE}`
+        );
+        const data = await res.json();
 
-      if (data.length > 0) {
-        speak(`Menampilkan ${data.length} hasil untuk ${q}`);
-      } else {
-        speak(`Tidak ditemukan resep untuk ${q}`);
+        if (!Array.isArray(data) || data.length === 0) {
+          backendExhausted = true;
+          break;
+        }
+
+        for (const d of data) {
+          const key = normalize(d.Title);
+          if (key && !localSeen.has(key)) {
+            localSeen.add(key);
+            localResults.push(d);
+          }
+        }
+
+        if (data.length < PAGE_SIZE) backendExhausted = true;
+        else backendPage++;
       }
+
+      if (myFetchId !== fetchIdRef.current) return;
+
+      setResults(localResults);
+      resultsRef.current = localResults;
+
+      setSeenTitles(localSeen);
+      seenRef.current = localSeen;
+
+      setLastBackendPage(backendPage);
+      lastBackendPageRef.current = backendPage;
+
+      setHasMore(!backendExhausted);
+      hasMoreRef.current = !backendExhausted;
+
+      const maxPageAvailable = Math.max(1, Math.ceil(localResults.length / PAGE_SIZE));
+      const targetPage = Math.min(uiPage, maxPageAvailable);
+
+      setPage(targetPage);
+      pageRef.current = targetPage;
+
+      const startI = (targetPage - 1) * PAGE_SIZE;
+      const finalItems = localResults.slice(startI, startI + PAGE_SIZE);
+
+      speak(`Menampilkan ${finalItems.length} resep ${q} di halaman ${targetPage}.`);
+
     } catch (err) {
-      console.error("Gagal mengambil data:", err);
+      console.error(err);
       speak("Terjadi kesalahan saat mencari resep.");
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔁 Reset pencarian
   const resetSearch = () => {
     setQuery("");
+    queryRef.current = "";
     setResults([]);
+    setSeenTitles(new Set());
     setPage(1);
+    setLastBackendPage(0);
+    setHasMore(true);
   };
 
-  // 🎤 Mic (speech to text)
   const startListening = () => {
     if (!("webkitSpeechRecognition" in window)) {
       alert("Browser tidak mendukung fitur suara.");
@@ -63,9 +207,6 @@ function App() {
     intro.onend = () => {
       const recognition = new window.webkitSpeechRecognition();
       recognition.lang = "id-ID";
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-
       recognition.start();
 
       recognition.onresult = (event) => {
@@ -73,14 +214,9 @@ function App() {
         setQuery(text);
         searchResep(text, 1);
       };
-
-      recognition.onerror = (event) => {
-        alert(`Gagal mendengarkan suara: ${event.error}`);
-      };
     };
   };
 
-  // 🔊 Text to Speech
   const speak = (text) => {
     if (!("speechSynthesis" in window)) return;
     const speech = new SpeechSynthesisUtterance(text);
@@ -89,22 +225,49 @@ function App() {
     window.speechSynthesis.speak(speech);
   };
 
-  // ✨ Highlight kata kunci (khusus Title)
   const highlightText = (text, keyword) => {
     if (!text || !keyword) return text;
     const regex = new RegExp(`(${keyword})`, "gi");
-    return text.split(regex).map((part, i) =>
-      regex.test(part) ? (
-        <span key={i} className="hl">
-          {part}
-        </span>
-      ) : (
-        part
-      )
+    return text.split(regex).map((p, i) =>
+      regex.test(p) ? <span key={i} className="hl">{p}</span> : p
     );
   };
 
-  // 🎨 Skeleton Loader
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      setResults([]);
+      searchResep(queryRef.current, 1);
+    }
+  };
+
+  if (!username) {
+    return (
+      <div className="wrap login">
+        <h1>👩‍🍳 Masukkan Nama Kamu</h1>
+
+        <input
+          className="input-name"
+          placeholder="Nama kamu..."
+          onKeyDown={(e) =>
+            e.key === "Enter" &&
+            e.target.value.trim() &&
+            handleStart(e.target.value)
+          }
+        />
+
+        <button
+          className="btn-start"
+          onClick={() => {
+            const val = document.querySelector(".input-name").value.trim();
+            handleStart(val);
+          }}
+        >
+          Mulai
+        </button>
+      </div>
+    );
+  }
+
   const SkeletonCard = () => (
     <div className="card skeleton">
       <div className="sk sk-1" />
@@ -113,175 +276,140 @@ function App() {
     </div>
   );
 
-  // 🌙 Toggle dark mode
-  const toggleDark = () => setDark(!dark);
+  const startIndex = (page - 1) * PAGE_SIZE;
+  const pageItems = results.slice(startIndex, startIndex + PAGE_SIZE);
 
   return (
     <div className={`wrap ${dark ? "dark" : ""}`}>
-      <style>{`
-        :root {
-          --bg1:#ffecd2; --bg2:#fcb69f;
-          --primary:#ff7043; --primary-2:#ff9800;
-          --accent:#43a047; --muted:#9e9e9e;
-          --card:#ffffff; --text:#333; --sub:#555;
-          --ring: rgba(255,112,67,.25);
-          --radius:16px;
-        }
-        body.dark, .wrap.dark {
-          --bg1:#1a1a1a; --bg2:#2a2a2a;
-          --card:#2e2e2e; --text:#f5f5f5;
-          --sub:#bbb; --primary:#ff5722;
-          --primary-2:#ff9800; --accent:#4caf50;
-          --muted:#757575; --ring: rgba(255,152,0,.35);
-        }
-        *{box-sizing:border-box} body{margin:0}
-        .wrap{
-          font-family:'Poppins','Segoe UI',sans-serif;
-          min-height:100vh; padding:20px;
-          background:linear-gradient(135deg,var(--bg1),var(--bg2));
-          transition:background .3s ease;
-        }
-        .title{
-          font-size:clamp(1.8rem,4vw,2.6rem);
-          font-weight:800;text-align:center;margin:10px 0 22px;
-          background:linear-gradient(45deg,var(--primary),var(--primary-2));
-          -webkit-background-clip:text;background-clip:text;color:transparent;
-        }
-        .bar{
-          max-width:820px;margin:0 auto 28px;padding:14px;
-          background:var(--card);border-radius:var(--radius);
-          box-shadow:0 6px 16px rgba(0,0,0,.12);
-          display:flex;gap:10px;flex-wrap:wrap;align-items:center;
-        }
-        .input{flex:1 1 260px;min-width:0;padding:12px 14px;border-radius:12px;
-          border:1px solid #e8e8e8;font-size:16px;outline:none;}
-        .input:focus{border-color:var(--primary);box-shadow:0 0 0 4px var(--ring);}
-        .btn{padding:12px 16px;border:none;border-radius:12px;font-weight:700;cursor:pointer}
-        .btn-primary{background:var(--primary);color:#fff}
-        .btn-accent{background:var(--accent);color:#fff}
-        .btn-muted{background:var(--muted);color:#fff}
-        .btn:disabled{opacity:.6;cursor:not-allowed}
+      {/* Logout */}
+      <button className="logout-btn" onClick={handleLogout}>🚪 Logout</button>
 
-        .grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-          max-width:1200px;margin:0 auto;}
-        .card{background:var(--card);border-radius:20px;padding:20px;
-          box-shadow:0 4px 12px rgba(0,0,0,.15);
-          display:flex;flex-direction:column;overflow:hidden;
-          transition:transform .22s ease,box-shadow .22s ease;}
-        .card:hover{transform:translateY(-4px);box-shadow:0 12px 26px rgba(0,0,0,.22)}
-        .emoji{font-size:2rem;text-align:center;margin-bottom:10px}
-        .title3{color:var(--text);margin:0 0 10px;text-align:center}
-        .scroll{flex:1;overflow:auto;padding-right:6px}
-        .meta{color:var(--sub);font-size:14px}
-        .speak{margin-top:10px;font-size:14px;padding:10px 12px}
+      {/* Pause / Resume suara */}
+      <div className="sound-control">
+        <button className="btn btn-muted" onClick={() => window.speechSynthesis.pause()}>
+          ⏸ Pause Suara
+        </button>
 
-        .skeleton .sk{border-radius:8px;background:#eee}
-        .skeleton .sk-1{height:20px;width:70%;margin-bottom:10px}
-        .skeleton .sk-2{height:14px;width:90%;margin-bottom:6px;background:#f3f3f3}
-        .skeleton .sk-3{height:14px;width:80%;background:#f3f3f3}
+        <button className="btn btn-accent" onClick={() => window.speechSynthesis.resume()}>
+          ▶ Lanjut Suara
+        </button>
+      </div>
 
-        .empty{text-align:center;color:var(--sub);font-size:1.05rem;grid-column:1/-1;}
-
-        .pager{margin-top:22px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
-        .hl{background:#ffeb3b;color:#000;font-weight:700;padding:0 2px;border-radius:4px}
-
-        /* Mobile fix */
-        @media(max-width:640px){
-          .card{max-height:unset}
-          .speak{padding:8px 12px;font-size:13px}
-        }
-      `}</style>
-
-      {/* Toggle dark mode */}
-      <div style={{ textAlign: "center", marginBottom: "15px" }}>
+      {/* Dark Mode */}
+      <div className="dm">
         <button
           className="btn btn-muted"
-          onClick={toggleDark}
-          style={{ background: dark ? "var(--primary-2)" : "var(--muted)" }}
+          onClick={() => setDark(!dark)}
         >
           {dark ? "☀️ Light Mode" : "🌙 Dark Mode"}
         </button>
       </div>
 
-      {/* Judul */}
-      <h1 className="title">🍲 Cari Resep Masakan</h1>
+      <h1 className="title">🍲 Hai, {username}! Cari Resep Masakan</h1>
 
-      {/* Search Bar */}
       <div className="bar">
         <input
           className="input"
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="🔍 Cari resep..."
         />
-        <button className="btn btn-primary" onClick={() => searchResep(query, 1)}>
+
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setResults([]);
+            resultsRef.current = [];
+            setSeenTitles(new Set());
+            seenRef.current = new Set();
+            setLastBackendPage(0);
+            lastBackendPageRef.current = 0;
+            setHasMore(true);
+            hasMoreRef.current = true;
+            searchResep(queryRef.current, 1);
+          }}
+        >
           Cari
         </button>
+
         <button className="btn btn-accent" onClick={startListening}>
           🎤
         </button>
+
         <button className="btn btn-muted" onClick={resetSearch}>
           🔄 Reset
         </button>
       </div>
 
-      {/* Hasil pencarian */}
       <div className="grid">
-        {loading
-          ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
-          : results.length === 0 ? (
-            <p className="empty">🔍 Tidak ada hasil. Coba kata kunci lain.</p>
-          ) : (
-            results.map((item, index) => (
-              <div key={item._id} className="card">
-                <div className="emoji">
-                  {["🍜", "🥘", "🍲", "🍗", "🥗", "🍛", "🍤"][index % 7]}
-                </div>
-
-                {/* Highlight hanya Title */}
-                <h3 className="title3">{highlightText(item.Title, query)}</h3>
-
-                <div className="scroll">
-                  <p className="meta">
-                    <b>Bahan:</b> {item.Ingredients || "-"}
-                  </p>
-                  <p className="meta">
-                    <b>Langkah:</b> {item.Steps || "-"}
-                  </p>
-                </div>
-
-                <p className="meta">
-                  <b>❤️ Disukai:</b> {item.Loves || 0}
-                </p>
-
-                <button
-                  className="btn speak"
-                  style={{ background: "var(--primary-2)", color: "#fff" }}
-                  onClick={() => speak(item.Title + ". " + (item.Steps || ""))}
-                >
-                  🔊 Baca Resep
-                </button>
+        {loading ? (
+          Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
+        ) : pageItems.length === 0 ? (
+          <p className="empty">🔍 Tidak ada hasil. Coba kata kunci lain.</p>
+        ) : (
+          pageItems.map((item, index) => (
+            <div key={item._id} className="card">
+              <div className="emoji">
+                {["🍜", "🥘", "🍲", "🍗", "🥗", "🍛", "🍤"][index % 7]}
               </div>
-            ))
-          )}
+
+              <h3 className="title3">
+                {highlightText(item.Title, queryRef.current)}
+              </h3>
+
+              <div className="scroll">
+                <p className="meta">
+                  <b>Bahan:</b> {item.Ingredients || "-"}
+                </p>
+                <p className="meta">
+                  <b>Langkah:</b> {item.Steps || "-"}
+                </p>
+              </div>
+
+              <p className="meta">
+                <b>❤️ Disukai:</b> {item.Loves || 0}
+              </p>
+
+              <button
+                className="btn speak"
+                onClick={() =>
+                  speak(item.Title + ". " + (item.Steps || ""))
+                }
+              >
+                🔊 Baca Resep
+              </button>
+            </div>
+          ))
+        )}
       </div>
 
-      {/* 📌 Pagination */}
       {results.length > 0 && (
         <div className="pager">
           <button
             className="btn btn-primary"
-            onClick={() => searchResep(query, page - 1)}
-            disabled={page === 1}
-            style={{ background: page === 1 ? "#ccc" : "var(--primary)" }}
+            onClick={() => {
+              const prevPage = Math.max(1, pageRef.current - 1);
+              searchResep(queryRef.current, prevPage);
+            }}
+            disabled={pageRef.current === 1}
           >
             ⬅ Prev
           </button>
-          <span className="btn-num active">Halaman {page}</span>
+
+          <span className="btn-num active">Halaman {pageRef.current}</span>
+
           <button
             className="btn btn-primary"
-            onClick={() => searchResep(query, page + 1)}
+            onClick={() => {
+              const nextPage = pageRef.current + 1;
+              searchResep(queryRef.current, nextPage);
+            }}
+            disabled={
+              !hasMoreRef.current &&
+              resultsRef.current.length <= pageRef.current * PAGE_SIZE
+            }
           >
             Next ➡
           </button>

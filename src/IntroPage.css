@@ -1,0 +1,60 @@
+.intro-wrap {
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #ffe0b2, #ffcc80);
+    font-family: 'Poppins', sans-serif;
+  }
+  
+  .intro-card {
+    text-align: center;
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+    max-width: 350px;
+    width: 90%;
+  }
+  
+  .big-icon {
+    font-size: 4rem;
+    animation: swing 2s infinite ease-in-out;
+  }
+  
+  @keyframes swing {
+    0%, 100% { transform: rotate(-10deg); }
+    50% { transform: rotate(10deg); }
+  }
+  
+  .intro-input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    margin-top: 10px;
+    margin-bottom: 20px;
+    font-size: 16px;
+  }
+  
+  .intro-btn {
+    background-color: #ff7043;
+    color: white;
+    padding: 12px 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.3s;
+  }
+  
+  .intro-btn:hover {
+    background-color: #ff5722;
+  }
+  
+  .small-text {
+    color: #666;
+    font-size: 0.9rem;
+    margin-top: 10px;
+  }
+  
