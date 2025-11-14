@@ -281,29 +281,34 @@ function App() {
 
   return (
     <div className={`wrap ${dark ? "dark" : ""}`}>
-      {/* Logout */}
-      <button className="logout-btn" onClick={handleLogout}>🚪 Logout</button>
+      <div className="navbar">
+        <div className="nav-inner">
 
-      {/* Pause / Resume suara */}
-      <div className="sound-control">
-        <button className="btn btn-muted" onClick={() => window.speechSynthesis.pause()}>
-          ⏸ Pause Suara
-        </button>
+          <div className="nav-left">
+            <button className="btn btn-muted" onClick={() => window.speechSynthesis.pause()}>
+              ⏸ Pause
+            </button>
 
-        <button className="btn btn-accent" onClick={() => window.speechSynthesis.resume()}>
-          ▶ Lanjut Suara
-        </button>
+            <button className="btn btn-accent" onClick={() => window.speechSynthesis.resume()}>
+              ▶ Lanjut
+            </button>
+
+            <button className="btn btn-stop" onClick={() => window.speechSynthesis.cancel()}>
+              🔴 Stop
+            </button>
+
+            <button className="btn btn-muted" onClick={() => setDark(!dark)}>
+              {dark ? "🌕 Light" : "🌙 Dark"}
+            </button>
+          </div>
+
+          <button className="logout-nav" onClick={handleLogout}>
+            🚪 Logout
+          </button>
+
+        </div>
       </div>
 
-      {/* Dark Mode */}
-      <div className="dm">
-        <button
-          className="btn btn-muted"
-          onClick={() => setDark(!dark)}
-        >
-          {dark ? "☀️ Light Mode" : "🌙 Dark Mode"}
-        </button>
-      </div>
 
       <h1 className="title">🍲 Hai, {username}! Cari Resep Masakan</h1>
 
@@ -375,7 +380,11 @@ function App() {
               <button
                 className="btn speak"
                 onClick={() =>
-                  speak(item.Title + ". " + (item.Steps || ""))
+                  speak(
+                    item.Title + ". " +
+                    "Bahan bahan: " + (item.Ingredients || "") + ". " +
+                    "Langkah langkah: " + (item.Steps || "")
+                  )
                 }
               >
                 🔊 Baca Resep
